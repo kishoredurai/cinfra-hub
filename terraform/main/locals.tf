@@ -1,5 +1,5 @@
 locals {
-  cluster_name = "${var.project_name}-eks"
+  cluster_name = "${var.project_name}-cluster"
 
   tags = merge(var.tags, {
     Project     = var.project_name

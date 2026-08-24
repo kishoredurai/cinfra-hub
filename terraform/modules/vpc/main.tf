@@ -2,7 +2,7 @@ module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 6.6"
 
-  name = "${var.project_name}-vpc"
+  name = var.name
   cidr = var.vpc_cidr
 
   azs             = var.availability_zones
@@ -16,16 +16,16 @@ module "vpc" {
   one_nat_gateway_per_az = var.one_nat_gateway_per_az
 
   public_subnet_tags = {
-    "kubernetes.io/role/elb"                      = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 
   private_subnet_tags = {
-    "kubernetes.io/role/internal-elb"             = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "shared"
+    "kubernetes.io/role/internal-elb"           = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
   }
 
-  tags = local.tags
+  tags = var.tags
 }
 
 # S3 gateway endpoint: keeps S3 traffic (ECR image layers, app data, etc.)
@@ -42,7 +42,7 @@ resource "aws_vpc_endpoint" "s3" {
     module.vpc.public_route_table_ids,
   )
 
-  tags = merge(local.tags, {
-    Name = "${var.project_name}-s3-gateway-endpoint"
+  tags = merge(var.tags, {
+    Name = "${var.name}-s3-gateway-endpoint"
   })
 }

@@ -124,6 +124,30 @@ variable "eks_managed_node_groups" {
 # Add-ons
 # ---------------------------------------------------------------------------
 
+variable "enable_eks_pod_identity" {
+  description = "Whether to install the eks-pod-identity-agent EKS addon. Required by enable_ebs_csi_driver and enable_aws_load_balancer_controller (and any other Pod Identity-based addon) — only turn this off if none of them are enabled."
+  type        = bool
+  default     = true
+}
+
+variable "eks_pod_identity_addon_version" {
+  description = "Specific eks-pod-identity-agent addon version to pin. Leave null to use the most recent version compatible with cluster_version."
+  type        = string
+  default     = null
+}
+
+variable "enable_metrics_server" {
+  description = "Whether to install metrics-server (via Helm) for kubectl top and Horizontal Pod Autoscaler support."
+  type        = bool
+  default     = true
+}
+
+variable "metrics_server_chart_version" {
+  description = "Specific metrics-server Helm chart version to pin. Leave null to install the latest chart version."
+  type        = string
+  default     = null
+}
+
 variable "enable_ebs_csi_driver" {
   description = "Whether to install the aws-ebs-csi-driver EKS addon (needed for dynamically provisioned EBS-backed PersistentVolumes)."
   type        = bool
