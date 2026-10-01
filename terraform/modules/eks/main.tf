@@ -14,10 +14,21 @@ module "cluster" {
 
   enable_cluster_creator_admin_permissions = true
 
+  # No customer-managed KMS envelope encryption for Kubernetes Secrets —
+  # also skips creating the module's default KMS key. EKS/etcd still
+  # encrypts data at rest regardless; this just opts out of the extra
+  # customer-key layer on top of that.
+  encryption_config = null
+
   addons = {
+    # before_compute = true installs these ahead of the node groups
+    # instead of depends_on-ing them. Without it, nodes come up before
+    # vpc-cni exists, sit NotReady forever ("cni plugin not initialized"),
+    # and the node group depends_on's these addons by default — a
+    # deadlock where neither side ever finishes.
+    vpc-cni    = { most_recent = true, before_compute = true }
+    kube-proxy = { most_recent = true, before_compute = true }
     coredns    = { most_recent = true }
-    kube-proxy = { most_recent = true }
-    vpc-cni    = { most_recent = true }
   }
 
   eks_managed_node_groups = {

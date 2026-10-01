@@ -23,6 +23,50 @@ variable "tags" {
 }
 
 # ---------------------------------------------------------------------------
+# VPC / EKS split
+# ---------------------------------------------------------------------------
+
+variable "create_vpc" {
+  description = "Whether this stack creates the VPC. Set false to attach the cluster to an existing VPC instead (supply existing_vpc_id / existing_private_subnet_ids / existing_public_subnet_ids). Lets you stand up the VPC and the cluster as separate applies against the same state."
+  type        = bool
+  default     = true
+}
+
+variable "create_eks" {
+  description = "Whether this stack creates the EKS cluster. Set false to apply only the VPC — e.g. to stand up networking well ahead of the cluster, or hand the VPC to a different cluster/team."
+  type        = bool
+  default     = true
+}
+
+variable "existing_vpc_id" {
+  description = "VPC ID to use when create_vpc = false. Ignored otherwise."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.create_vpc || var.existing_vpc_id != null
+    error_message = "existing_vpc_id must be set when create_vpc = false."
+  }
+}
+
+variable "existing_private_subnet_ids" {
+  description = "Private subnet IDs (for node groups + add-ons) to use when create_vpc = false. Ignored otherwise."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = var.create_vpc || length(var.existing_private_subnet_ids) > 0
+    error_message = "existing_private_subnet_ids must be set when create_vpc = false."
+  }
+}
+
+variable "existing_public_subnet_ids" {
+  description = "Public subnet IDs (for the cluster's control-plane ENIs) to use when create_vpc = false. Ignored otherwise."
+  type        = list(string)
+  default     = []
+}
+
+# ---------------------------------------------------------------------------
 # Networking
 # ---------------------------------------------------------------------------
 

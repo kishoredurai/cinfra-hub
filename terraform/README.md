@@ -9,7 +9,7 @@ the EBS CSI driver, the AWS Load Balancer Controller, and Metrics Server.
 terraform/
 ├── bootstrap/            # one-time: creates the S3 state bucket (local state)
 ├── main/                 # root module — wires vpc + eks together, owns the backend
-├── clusters/             # per-cluster *.tfvars (dev.tfvars, prod.tfvars, ...)
+├── tfvars/               # per cluster: <name>.tfvars + <name>.backend.hcl
 └── modules/
     ├── vpc/               # VPC, subnets, IGW, NAT gateway(s), S3 gateway endpoint
     └── eks/               # EKS cluster + managed node groups
@@ -30,10 +30,14 @@ terraform/
   module's inputs. State is stored in S3, and locking uses Terraform's
   native S3 lockfile (`use_lockfile = true`, Terraform >= 1.10) — no
   DynamoDB table required.
-- `clusters/` — one `*.tfvars` file per cluster you want to stand up
-  (`dev.tfvars`, `prod.tfvars`, ...). `main/` has no values of its own
-  baked in; every cluster is `main/` + one of these files + one Terraform
-  workspace. See "Running multiple clusters" below.
+- `tfvars/` — two files per cluster you want to stand up:
+  `<name>.tfvars` (its input variables — `project_name`, CIDRs, node group
+  sizing, add-on toggles, ...) and `<name>.backend.hcl` (where *that
+  cluster's* state lives: same shared bucket, but a **unique `key`** —
+  `clusters/<name>/terraform.tfstate` — so every cluster's state is fully
+  separate, not just namespaced within a shared one). `main/` has no
+  values of its own baked in; every cluster is `main/` + this pair of
+  files. See "Running multiple clusters" below.
 - `modules/vpc/` — standalone VPC module (usable outside this repo).
 - `modules/eks/` — standalone EKS module (usable outside this repo): creates
   the cluster + node groups, and owns four add-ons as nested submodules
@@ -65,31 +69,29 @@ prod — Terraform and EKS both ship new releases regularly):
 ```bash
 cd bootstrap
 terraform init
-terraform apply -var="state_bucket_name=<globally-unique-bucket-name>" -var="aws_region=us-east-1"
+terraform apply   # defaults to state_bucket_name = "kishore-state" in us-east-1
+# or override: terraform apply -var="state_bucket_name=<your-bucket-name>" -var="aws_region=<region>"
 ```
 
 Note the `state_bucket_name` output.
 
-### 2. Point main/ at that bucket
+### 2. Point main/ at a cluster's state
+
+Every cluster in `tfvars/` has its own `<name>.backend.hcl` (bucket +
+unique `key`) — `tfvars/vault-cluster.backend.hcl` and
+`tfvars/prod.backend.hcl` already default to `bucket = "kishore-state"`
+in `us-east-1`; edit them if you used a different name/region in step 1.
 
 ```bash
 cd ../main
-cp backend.hcl.example backend.hcl
-# edit backend.hcl: set bucket = "<name from step 1>", region, key
-terraform init -backend-config=backend.hcl
+terraform init -backend-config=../tfvars/vault-cluster.backend.hcl
 ```
 
-### 3. Pick (or create) a cluster's workspace, then plan/apply it
-
-Each cluster is a Terraform **workspace** + a **`.tfvars` file** in
-`clusters/`. `clusters/dev.tfvars` and `clusters/prod.tfvars` are ready to
-use as-is (they use distinct `project_name`/`vpc_cidr` so they never
-collide if run in the same account); copy one to add another cluster.
+### 3. Plan/apply that cluster
 
 ```bash
-terraform workspace new dev      # first time only — creates + switches to it
-terraform plan  -var-file=../clusters/dev.tfvars
-terraform apply -var-file=../clusters/dev.tfvars
+terraform plan  -var-file=../tfvars/vault-cluster.tfvars
+terraform apply -var-file=../tfvars/vault-cluster.tfvars
 ```
 
 ### 4. Connect kubectl
@@ -100,40 +102,79 @@ $(terraform output -raw configure_kubectl)
 
 ## Running multiple clusters
 
-`main/` carries no cluster-specific values — every cluster is just
-"`main/` + a `clusters/<name>.tfvars` file + a same-named Terraform
-workspace". Workspaces keep each cluster's state separate within the
-*same* S3 bucket/backend (the object key becomes `env:/<workspace>/<key>`
-automatically), so `terraform init` only ever needs to run once, even
-across many clusters.
+`main/` carries no cluster-specific values, and no cluster-specific
+backend target either — every cluster is just "`main/` + a
+`tfvars/<name>.tfvars` file + a `tfvars/<name>.backend.hcl` file". Each
+cluster's `.backend.hcl` points at the same shared state bucket but a
+**unique `key`** (`clusters/<name>/terraform.tfstate`), so each cluster's
+state is a fully separate S3 object — not just a namespaced path inside a
+shared one. That means switching which cluster you're operating on means
+re-pointing the backend, via `-reconfigure`:
 
 ```bash
 cd main
-terraform init -backend-config=backend.hcl   # once, regardless of cluster count
 
-# stand up dev
-terraform workspace new dev
-terraform apply -var-file=../clusters/dev.tfvars
+# stand up the vault cluster
+terraform init -reconfigure -backend-config=../tfvars/vault-cluster.backend.hcl
+terraform apply -var-file=../tfvars/vault-cluster.tfvars
 
-# stand up prod, without touching dev's state
-terraform workspace new prod
-terraform apply -var-file=../clusters/prod.tfvars
+# switch to prod — this re-targets main/'s backend, it does not touch
+# vault-cluster's state
+terraform init -reconfigure -backend-config=../tfvars/prod.backend.hcl
+terraform apply -var-file=../tfvars/prod.tfvars
 
-# see what exists / move between them
-terraform workspace list
-terraform workspace select dev
-terraform plan -var-file=../clusters/dev.tfvars   # confirms no drift
+# switch back
+terraform init -reconfigure -backend-config=../tfvars/vault-cluster.backend.hcl
+terraform plan -var-file=../tfvars/vault-cluster.tfvars   # confirms no drift
 
-# add a third cluster
-cp ../clusters/dev.tfvars ../clusters/staging.tfvars
+# add another cluster
+cp ../tfvars/prod.tfvars        ../tfvars/staging.tfvars
+cp ../tfvars/prod.backend.hcl   ../tfvars/staging.backend.hcl
 # edit staging.tfvars: at minimum project_name and vpc_cidr must be unique
-terraform workspace new staging
-terraform apply -var-file=../clusters/staging.tfvars
+# edit staging.backend.hcl: key = "clusters/staging/terraform.tfstate"
+terraform init -reconfigure -backend-config=../tfvars/staging.backend.hcl
+terraform apply -var-file=../tfvars/staging.tfvars
 ```
 
-Whichever workspace is currently selected is the one `terraform plan` /
-`apply` / `destroy` / `output` act on — always run `terraform workspace
-show` first if you're not sure which cluster you're about to change.
+Whichever backend you last ran `terraform init -reconfigure` against is
+the one `terraform plan`/`apply`/`destroy`/`output` act on. To check which
+that is: `jq .backend.config main/.terraform/terraform.tfstate` prints
+the currently configured bucket/key. When in doubt, just re-run
+`init -reconfigure -backend-config=...` against the cluster you mean to
+target before anything destructive — it's a no-op if you're already
+pointed at it.
+
+## Creating the VPC and the cluster separately
+
+By default `main/` creates both the VPC and the EKS cluster in one
+`apply`. Two toggles let you split that into separate applies (still one
+state, one `tfvars`/`backend.hcl` pair per cluster):
+
+- `create_vpc` (default `true`) — set `false` to skip creating a VPC and
+  instead attach the cluster to one that already exists, via
+  `existing_vpc_id` / `existing_private_subnet_ids` /
+  `existing_public_subnet_ids`.
+- `create_eks` (default `true`) — set `false` to apply only the VPC,
+  with no cluster yet.
+
+```bash
+# stand up just the networking first
+terraform apply -var-file=../tfvars/vault-cluster.tfvars -var="create_eks=false"
+
+# ...later, add the cluster on top (same state, same tfvars file)
+terraform apply -var-file=../tfvars/vault-cluster.tfvars
+
+# or: point a cluster at a VPC this stack didn't create
+terraform apply -var-file=../tfvars/vault-cluster.tfvars \
+  -var="create_vpc=false" \
+  -var="existing_vpc_id=vpc-0123456789abcdef0" \
+  -var='existing_private_subnet_ids=["subnet-aaa","subnet-bbb","subnet-ccc"]' \
+  -var='existing_public_subnet_ids=["subnet-ddd","subnet-eee","subnet-fff"]'
+```
+
+`create_vpc = false` without `existing_vpc_id`/`existing_private_subnet_ids`
+fails at `plan`/`apply` with a clear error (a variable validation rule),
+not partway through creating resources.
 
 ## Toggles worth knowing about
 
@@ -152,13 +193,16 @@ show` first if you're not sure which cluster you're about to change.
 - `enable_eks_pod_identity` — only turn this off if you've also disabled
   both `enable_ebs_csi_driver` and `enable_aws_load_balancer_controller`;
   otherwise those add-ons' pods have no way to get IAM credentials.
+- `create_vpc` / `create_eks` — apply the VPC and the cluster as separate
+  steps, or attach the cluster to a VPC this stack didn't create. See
+  "Creating the VPC and the cluster separately" above.
 
 ## Destroy order
 
 ```bash
 cd main
-terraform workspace select dev                              # pick the cluster
-terraform destroy -var-file=../clusters/dev.tfvars
+terraform init -reconfigure -backend-config=../tfvars/vault-cluster.backend.hcl   # pick the cluster
+terraform destroy -var-file=../tfvars/vault-cluster.tfvars
 
 cd ../bootstrap && terraform destroy   # only if you're tearing down the state bucket too
 ```

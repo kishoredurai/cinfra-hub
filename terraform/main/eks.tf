@@ -1,13 +1,14 @@
 module "eks" {
+  count  = var.create_eks ? 1 : 0
   source = "../modules/eks"
 
   aws_region      = var.aws_region
   cluster_name    = local.cluster_name
   cluster_version = var.cluster_version
 
-  vpc_id             = module.vpc.vpc_id
-  private_subnet_ids = module.vpc.private_subnets
-  public_subnet_ids  = module.vpc.public_subnets
+  vpc_id             = local.vpc_id
+  private_subnet_ids = local.private_subnet_ids
+  public_subnet_ids  = local.public_subnet_ids
 
   endpoint_public_access  = var.cluster_endpoint_public_access
   endpoint_private_access = var.cluster_endpoint_private_access

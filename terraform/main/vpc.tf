@@ -1,4 +1,5 @@
 module "vpc" {
+  count  = var.create_vpc ? 1 : 0
   source = "../modules/vpc"
 
   aws_region   = var.aws_region

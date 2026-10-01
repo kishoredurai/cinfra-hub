@@ -9,6 +9,16 @@ aws_region   = "us-east-1"
 project_name = "prod"
 environment  = "prod"
 
+# Create both the VPC and the cluster in this apply. Set create_eks =
+# false to stand up just the VPC first, or create_vpc = false + the
+# existing_* vars to attach this cluster to a VPC created elsewhere —
+# see README.md "Creating the VPC and the cluster separately".
+create_vpc = true
+create_eks = true
+# existing_vpc_id             = null
+# existing_private_subnet_ids = []
+# existing_public_subnet_ids  = []
+
 vpc_cidr             = "10.1.0.0/16"
 availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
 public_subnet_cidrs  = ["10.1.0.0/24", "10.1.1.0/24", "10.1.2.0/24"]
